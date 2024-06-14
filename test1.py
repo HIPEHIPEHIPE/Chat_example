@@ -1,23 +1,24 @@
+import os
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import time
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from accelerate import init_empty_weights, load_checkpoint_and_dispatch, dispatch_model, infer_auto_device_map
 
-# 로컬에 저장된 모델 경로 설정
-local_model_path = "C:/Temp"
+model_id = 'beomi/Llama-3-Open-Ko-8B'
+offload_folder = './offload'  # 오프로드 폴더 경로 지정
+os.makedirs(offload_folder, exist_ok=True)
 
-# 모델과 토크나이저 로드
-model = AutoModelForCausalLM.from_pretrained(local_model_path)
-tokenizer = AutoTokenizer.from_pretrained(local_model_path)
+# 토크나이저 로드
+tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-# 더미 입력 생성
-dummy_input = torch.tensor([tokenizer.encode("Hello, how are you?", return_tensors="pt").input_ids])
+# 빈 가중치로 모델 초기화
+with init_empty_weights():
+    model = AutoModelForCausalLM.from_config(
+        AutoModelForCausalLM.from_pretrained(model_id).config
+    )
 
-# ONNX로 변환
-torch.onnx.export(
-    model, 
-    dummy_input, 
-    "llama_model.onnx", 
-    input_names=["input_ids"], 
-    output_names=["output"],
-    dynamic_axes={"input_ids": {0: "batch_size"}, "output": {0: "batch_size"}},
-    opset_version=11
+# 모델 로드 및 배포
+model = load_checkpoint_and_dispatch(
+    model, model_id, device_map="auto", offload_folder=offload_folder, offload_state_dict=True
 )
+model.eval()
